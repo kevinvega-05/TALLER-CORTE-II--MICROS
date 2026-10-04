@@ -150,23 +150,109 @@ python3 beta.py --num_drones 2
   abrir `nvidia-settings`, en **PRIME Profiles** elegir
   **NVIDIA (Performance Mode)**, reiniciar y volver a intentar.
 
-### 1.8 Código Arduino IDE
+### 1.8 Codigo de Visual (Python)
+
+ ```cpp
+ import serial
+import numpy as np
+# Importaciones hipotéticas basadas en gym-pybullet-drones
+# from envs.HoverAviary import HoverAviary
+# from control.DSLPIDControl import DSLPIDControl
+
+def iniciar_simulacion():
+    # 1. Conectar con la ESP32 (ajusta el puerto 'COM3' o '/dev/ttyUSB0' según tu OS)
+    try:
+        esp32 = serial.Serial('COM3', 115200, timeout=0.1)
+    except:
+        print("Error: No se pudo conectar a la ESP32")
+        return
+
+    # 2. Inicializar entorno de PyBullet y controladores
+    # env = HoverAviary(...)
+    # ctrl = DSLPIDControl(...)
+    
+    # Coordenada objetivo inicial (Lugar A)
+    target_pos = np.array([0.0, 0.0, 1.0]) 
+
+    print("Simulación iniciada. Esperando comandos de la ESP32...")
+
+    # Bucle de simulación
+    # for i in range(duracion_simulacion):
+        # 3. Leer datos de la ESP32 (si los hay)
+        if esp32.in_waiting > 0:
+            datos_recibidos = esp32.readline().decode('utf-8').strip()
+            if datos_recibidos:
+                # Se espera un formato como "x,y,z"
+                try:
+                    x, y, z = map(float, datos_recibidos.split(','))
+                    target_pos = np.array([x, y, z])
+                    print(f"Nuevo objetivo (ESP32): {target_pos}")
+                except ValueError:
+                    pass # Ignorar tramas corruptas
+
+        # 4. Calcular acción de control para ir al target_pos y avanzar simulación
+        # action = ctrl.computeControlFromState(..., target_pos=target_pos)
+        # obs, reward, done, info = env.step(action)
+        
+        # env.render()
+ 
+ ```
+
+### 1.9 Código Arduino IDE
 
 <!-- Pega tu código entre las líneas ```cpp y ``` y guarda el archivo .ino en punto1/arduino/ -->
 
 📄 Archivo: [`punto1/arduino/punto1.ino`](punto1/arduino/punto1.ino)
 
 ```cpp
-// ===== Punto 1 — Código Arduino IDE =====
-// Pega aquí tu código
+
+// Definición de los estados o lugares
+int lugar_actual = 0; // 0 = Lugar A, 1 = Lugar B, 2 = Lugar C
+
+// Tiempos para controlar el cambio de lugar sin usar delay() que bloquee el procesador
+unsigned long tiempo_anterior = 0;
+const long intervalo = 10000; // Tiempo en milisegundos (10 segundos por lugar)
 
 void setup() {
-
+  // Iniciar la comunicación Serial. 
+  // IMPORTANTE: Debe coincidir exactamente con el BAUD_RATE de Python (115200)
+  Serial.begin(115200); 
+  
+  // Pequeña pausa para estabilizar la conexión serial
+  delay(1000); 
 }
 
 void loop() {
+  unsigned long tiempo_actual = millis();
 
+  // Comprobar si han pasado 10 segundos para cambiar de objetivo
+  if (tiempo_actual - tiempo_anterior >= intervalo) {
+    tiempo_anterior = tiempo_actual;
+
+    // Enviar la coordenada correspondiente al lugar actual
+    // El formato debe ser estrictamente "X,Y,Z" para que Python lo lea bien
+    switch (lugar_actual) {
+      case 0:
+        Serial.println("0.0,0.0,1.0");  // Coordenadas Lugar A
+        break;
+      case 1:
+        Serial.println("1.5,1.5,1.5");  // Coordenadas Lugar B
+        break;
+      case 2:
+        Serial.println("-1.5,1.5,1.0"); // Coordenadas Lugar C
+        break;
+    }
+
+    // Avanzar al siguiente lugar
+    lugar_actual++;
+    
+    // Si ya pasamos por los 3 lugares, reiniciar el ciclo al Lugar A
+    if (lugar_actual > 2) {
+      lugar_actual = 0; 
+    }
+  }
 }
+
 ```
 
 **Explicación del código:**
@@ -349,23 +435,452 @@ elimina y el objeto queda sujeto a la gravedad (si se suelta en el aire, cae).
 - `baxter_console_control.py` — simulación PyBullet + lectura serial + IK + agarre
 - `esp32_console/esp32_console.ino` — firmware de la consola física
 
-### 2.9 Código Arduino IDE
+### 2.9 Código Visual (Python)
+```cpp
+import time
+import numpy as np
+import pybullet as p
+import pybullet_data
 
-<!-- Pega tu código entre las líneas ```cpp y ``` -->
+try:
+    import serial
+except ImportError:
+    serial = None
+    print("[AVISO] pyserial no está instalado (pip install pyserial). "
+          "El script funcionará en modo DEMO con sliders en vez de la ESP32.")
+
+# ---------------------------------------------------------------------------
+# CONFIGURACIÓN — AJUSTAR SEGÚN TU EQUIPO
+# ---------------------------------------------------------------------------
+SERIAL_PORT = "COM5"        # Windows: "COM5", "COM7"...  Linux/Mac: "/dev/ttyUSB0"
+BAUD_RATE = 115200          # Debe coincidir con el firmware del ESP32
+USE_SERIAL = False          # Empieza en False para probar con sliders. Cambia a True con la ESP32 conectada.
+
+SMOOTHING_ALPHA = 0.08      # 0 < alpha <= 1. Más bajo = movimiento más suave/lento
+GRASP_DISTANCE = 0.06       # metros. Distancia máx. para considerar "agarrado"
+OBJECT_START_POS = [0.2, 0.0, -0.1]   # mismo punto TARGET del demo original
+OBJECT_HALF_EXTENT = 0.025  # mitad del lado de cube_small.urdf (cubo de 5 cm)
+
+# El demo original de Erwin Coumans NO tiene piso a la altura del brazo: el
+# plano (suelo) está a z=-1, muy por debajo del punto TARGET (z=-0.1). Si se
+# soltara el cubo ahí sin apoyo, caería ~90 cm antes de que el brazo lo
+# alcance. Por eso se agrega una plataforma pequeña justo debajo del cubo.
+PLATFORM_HALF_EXTENTS = [0.15, 0.15, 0.02]  # 30x30x4 cm
+
+# --- Ajustes de rendimiento (bajar estos valores si el PC se siente lento) ---
+SIM_HZ = 60                 # pasos de física por segundo (demo original usa 240)
+SOLVER_ITERATIONS = 8       # iteraciones del solver de contacto (default de PyBullet: 50)
+IK_EVERY_N_STEPS = 1        # recalcular IK cada N pasos de simulación (sube a 2-3 si hace falta)
+
+# ---------------------------------------------------------------------------
+
+
+def setUpWorld(initialSimSteps=100):
+    """Carga el plano y a Baxter, igual que el demo original, pero con
+    ajustes de físicas más livianos para no sobrecargar equipos modestos."""
+    p.resetSimulation()
+    p.setAdditionalSearchPath(pybullet_data.getDataPath())
+    p.setPhysicsEngineParameter(fixedTimeStep=1.0 / SIM_HZ, numSolverIterations=SOLVER_ITERATIONS)
+
+    p.loadURDF("plane.urdf", [0, 0, -1], useFixedBase=True)
+
+    p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 0)
+    p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 0)  # las sombras son lo más pesado de renderizar
+    baxterId = p.loadURDF(
+        "baxter_common/baxter_description/urdf/toms_baxter.urdf",
+        useFixedBase=True,
+    )
+    p.resetBasePositionAndOrientation(
+        baxterId, [0.5, -0.8, 0.0], [0., 0., -1., -1.]
+    )
+    p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1)
+
+    endEffectorId = 48  # gripper izquierda (mismo índice que el demo original)
+    p.setGravity(0., 0., -10.)
+
+    for _ in range(initialSimSteps):
+        p.stepSimulation()
+
+    return baxterId, endEffectorId
+
+
+def getJointRanges(bodyId, includeFixed=False):
+    """
+    Igual que en el demo original, pero además devuelve la lista de
+    articulaciones móviles y su qIndex, precalculada UNA sola vez para
+    no volver a llamar getJointInfo dentro del bucle principal.
+    """
+    lowerLimits, upperLimits, jointRanges, restPoses = [], [], [], []
+    movableJoints = []   # [(jointIndex, qIndex), ...]
+    numJoints = p.getNumJoints(bodyId)
+
+    for i in range(numJoints):
+        jointInfo = p.getJointInfo(bodyId, i)
+        if includeFixed or jointInfo[3] > -1:
+            rp = p.getJointState(bodyId, i)[0]
+            lowerLimits.append(-2)
+            upperLimits.append(2)
+            jointRanges.append(2)
+            restPoses.append(rp)
+            if jointInfo[3] > -1:
+                movableJoints.append((i, jointInfo[3]))
+
+    return lowerLimits, upperLimits, jointRanges, restPoses, movableJoints
+
+
+def findGripperFingerJoints(bodyId, endEffectorId):
+    """
+    Busca automáticamente las articulaciones de los dedos de la pinza
+    que corresponde al mismo brazo que endEffectorId, para poder
+    abrir/cerrar la pinza sin depender de índices fijos.
+
+    En el URDF de Baxter el link del efector final se llama
+    "left_gripper" / "right_gripper", pero las articulaciones de los
+    dedos usan la abreviatura corta: "l_gripper_l_finger_joint",
+    "l_gripper_r_finger_joint" (y su equivalente "r_..." del otro
+    brazo). Por eso se deriva la abreviatura de lado (l/r) en vez de
+    comparar el nombre completo.
+    """
+    eeInfo = p.getJointInfo(bodyId, endEffectorId)
+    eeLinkName = eeInfo[12].decode("utf-8")  # child link name, p.ej "left_gripper"
+    side = "l" if eeLinkName.startswith("left") else "r"
+    prefix = side + "_gripper"  # p.ej "l_gripper"
+
+    fingerJoints = []
+    for i in range(p.getNumJoints(bodyId)):
+        info = p.getJointInfo(bodyId, i)
+        jointName = info[1].decode("utf-8")
+        if jointName.startswith(prefix) and "finger" in jointName and info[3] > -1:
+            lower, upper = info[8], info[9]
+            fingerJoints.append({"index": i, "lower": lower, "upper": upper})
+
+    return fingerJoints
+
+
+def setGripper(bodyId, fingerJoints, openFraction):
+    """
+    openFraction: 0.0 = totalmente cerrada, 1.0 = totalmente abierta.
+    Mueve ambos dedos con control de posición (movimiento suave).
+    """
+    openFraction = max(0.0, min(1.0, openFraction))
+    for f in fingerJoints:
+        target = f["lower"] + openFraction * (f["upper"] - f["lower"])
+        p.setJointMotorControl2(
+            bodyIndex=bodyId,
+            jointIndex=f["index"],
+            controlMode=p.POSITION_CONTROL,
+            targetPosition=target,
+            force=20,
+        )
+
+
+def calculateAndApplyIK(bodyId, endEffectorId, targetPosition,
+                         lowerLimits, upperLimits, jointRanges, restPoses,
+                         movableJoints):
+    """
+    Calcula la IK con el solver NATIVO de PyBullet en una sola llamada
+    (maxNumIterations=5 en vez de un bucle manual en Python que reevalúa
+    la IK decenas o cientos de veces por frame — eso es lo que suele
+    congelar la simulación) y aplica control de POSICIÓN sobre la lista
+    de articulaciones ya precalculada.
+    """
+    jointPoses = p.calculateInverseKinematics(
+        bodyId, endEffectorId, targetPosition,
+        lowerLimits=lowerLimits, upperLimits=upperLimits,
+        jointRanges=jointRanges, restPoses=restPoses,
+        maxNumIterations=5, residualThreshold=1e-3,
+    )
+
+    for jointIndex, qIndex in movableJoints:
+        p.setJointMotorControl2(
+            bodyIndex=bodyId,
+            jointIndex=jointIndex,
+            controlMode=p.POSITION_CONTROL,
+            targetPosition=jointPoses[qIndex - 7],
+            force=200,
+            positionGain=0.3,
+            velocityGain=1.0,
+        )
+
+
+def createSupportPlatform(xy, topZ, halfExtents=PLATFORM_HALF_EXTENTS):
+    """
+    Crea una plataforma estática (caja fija, sin masa) cuya cara
+    superior queda exactamente en topZ, para que el objeto a coger
+    tenga dónde apoyarse en vez de caer hasta el plano del suelo.
+    """
+    centerZ = topZ - halfExtents[2]
+    colId = p.createCollisionShape(p.GEOM_BOX, halfExtents=halfExtents)
+    visId = p.createVisualShape(p.GEOM_BOX, halfExtents=halfExtents, rgbaColor=[0.55, 0.4, 0.25, 1])
+    return p.createMultiBody(
+        baseMass=0,
+        baseCollisionShapeIndex=colId,
+        baseVisualShapeIndex=visId,
+        basePosition=[xy[0], xy[1], centerZ],
+    )
+
+
+class ConsoleReader:
+    """
+    Lee líneas de la ESP32 con formato:  X,Y,Z,G\\n
+        X, Y, Z -> floats, posición objetivo del efector final (metros)
+        G       -> 0 (pinza cerrada) o 1 (pinza abierta)
+
+    Se queda solo con la ÚLTIMA línea disponible en el buffer para
+    evitar que se acumule retraso (lag) entre la consola y el robot.
+    """
+
+    def __init__(self, port, baud):
+        self.ser = None
+        self.last_target = [0.2, 0.0, -0.1]
+        self.last_gripper_open = True
+        if serial is None:
+            return
+        try:
+            self.ser = serial.Serial(port, baud, timeout=0)
+            time.sleep(2)  # esperar reset del ESP32 al abrir el puerto
+            print(f"[OK] Conectado a la ESP32 en {port} @ {baud} baudios")
+        except Exception as e:
+            print(f"[ERROR] No se pudo abrir {port}: {e}")
+            self.ser = None
+
+    def read_latest(self):
+        if self.ser is None:
+            return self.last_target, self.last_gripper_open
+
+        newest_line = None
+        try:
+            while self.ser.in_waiting:
+                line = self.ser.readline().decode("utf-8", errors="ignore").strip()
+                if line:
+                    newest_line = line
+        except Exception as e:
+            print(f"[ERROR serial] {e}")
+            return self.last_target, self.last_gripper_open
+
+        if newest_line:
+            try:
+                x, y, z, g = newest_line.split(",")
+                self.last_target = [float(x), float(y), float(z)]
+                self.last_gripper_open = int(g) == 1
+            except ValueError:
+                pass  # línea corrupta / incompleta -> se ignora
+
+        return self.last_target, self.last_gripper_open
+
+
+def main():
+    guiClient = p.connect(p.GUI)
+    p.configureDebugVisualizer(p.COV_ENABLE_GUI, 1)
+    p.resetDebugVisualizerCamera(2., 180, 0., [0.52, 0.2, np.pi / 4.])
+
+    baxterId, endEffectorId = setUpWorld()
+    lowerLimits, upperLimits, jointRanges, restPoses, movableJoints = getJointRanges(baxterId, includeFixed=False)
+    fingerJoints = findGripperFingerJoints(baxterId, endEffectorId)
+
+    # Plataforma de apoyo + objeto que el robot debe poder coger y mover
+    platformTopZ = OBJECT_START_POS[2] - OBJECT_HALF_EXTENT - 0.002
+    createSupportPlatform(OBJECT_START_POS[:2], platformTopZ)
+    objectId = p.loadURDF("cube_small.urdf", OBJECT_START_POS)
+    p.addUserDebugText("TARGET", OBJECT_START_POS, textColorRGB=[1, 0, 0], textSize=1.5)
+
+    # Sliders de respaldo (modo DEMO sin ESP32)
+    targetPosXId = p.addUserDebugParameter("targetPosX", -1, 1, OBJECT_START_POS[0])
+    targetPosYId = p.addUserDebugParameter("targetPosY", -1, 1, OBJECT_START_POS[1])
+    targetPosZId = p.addUserDebugParameter("targetPosZ", -1, 1, OBJECT_START_POS[2])
+    gripperId = p.addUserDebugParameter("gripper (1=abierta)", 0, 1, 1)
+
+    reader = ConsoleReader(SERIAL_PORT, BAUD_RATE) if USE_SERIAL else None
+
+    currentTarget = np.array(OBJECT_START_POS, dtype=float)
+    grasped = False
+    constraintId = None
+    stepCount = 0
+    frameDuration = 1.0 / SIM_HZ
+
+    print("Simulación iniciada. Cierra la ventana o Ctrl+C en la consola para salir.")
+
+    try:
+        while p.isConnected():
+            loopStart = time.time()
+
+            if reader is not None:
+                rawTarget, gripperOpen = reader.read_latest()
+            else:
+                rawTarget = [
+                    p.readUserDebugParameter(targetPosXId),
+                    p.readUserDebugParameter(targetPosYId),
+                    p.readUserDebugParameter(targetPosZId),
+                ]
+                gripperOpen = p.readUserDebugParameter(gripperId) > 0.5
+
+            # --- Movimiento fluido: filtro paso-bajo hacia el objetivo real ---
+            rawTarget = np.array(rawTarget, dtype=float)
+            currentTarget += SMOOTHING_ALPHA * (rawTarget - currentTarget)
+
+            if stepCount % IK_EVERY_N_STEPS == 0:
+                calculateAndApplyIK(
+                    baxterId, endEffectorId, currentTarget.tolist(),
+                    lowerLimits, upperLimits, jointRanges, restPoses,
+                    movableJoints,
+                )
+                openFraction = 1.0 if gripperOpen else 0.0
+                setGripper(baxterId, fingerJoints, openFraction)
+
+            # --- Lógica de agarre ---
+            eeState = p.getLinkState(baxterId, endEffectorId)
+            eePos = np.array(eeState[4])
+            objPos, _ = p.getBasePositionAndOrientation(objectId)
+            dist = np.linalg.norm(eePos - np.array(objPos))
+
+            if (not gripperOpen) and (not grasped) and dist < GRASP_DISTANCE:
+                constraintId = p.createConstraint(
+                    parentBodyUniqueId=baxterId,
+                    parentLinkIndex=endEffectorId,
+                    childBodyUniqueId=objectId,
+                    childLinkIndex=-1,
+                    jointType=p.JOINT_FIXED,
+                    jointAxis=[0, 0, 0],
+                    parentFramePosition=[0, 0, 0],
+                    childFramePosition=[0, 0, 0],
+                )
+                grasped = True
+                print("[AGARRE] Objeto sujetado por la pinza.")
+
+            if gripperOpen and grasped:
+                p.removeConstraint(constraintId)
+                constraintId = None
+                grasped = False
+                print("[SUELTA] Objeto liberado.")
+
+            p.stepSimulation()
+            stepCount += 1
+
+            # Mantiene el ritmo de simulación en SIM_HZ sin acumular retraso
+            elapsed = time.time() - loopStart
+            sleepTime = frameDuration - elapsed
+            if sleepTime > 0:
+                time.sleep(sleepTime)
+
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if p.isConnected():
+            p.disconnect(guiClient)
+
+
+if __name__ == "__main__":
+    main()
+
+
+```
+
+### 2.10 Código Arduino IDE
 
 📄 Archivo: [`punto2/esp32_console/esp32_console.ino`](punto2/esp32_console/esp32_console.ino)
 
 ```cpp
-// ===== Punto 2 — Consola ESP32 (un brazo + agarre) =====
-// Pega aquí tu código
+/*
+  Consola de mandos para Baxter (ESP32) — PyBullet
+  =================================================
+
+  Lee 3 potenciómetros (ejes X, Y, Z del efector final) y un pulsador
+  (abrir/cerrar pinza), y envía por serial una línea con el formato:
+
+        X,Y,Z,G\n
+
+    X, Y, Z -> floats, posición objetivo dentro del espacio de trabajo
+               alcanzable por Baxter (mismos rangos que el demo de
+               PyBullet: X ~ [-0.3, 0.9], Y ~ [-0.8, 0.8], Z ~ [-0.3, 0.5])
+    G       -> 1 = pinza abierta, 0 = pinza cerrada
+
+  Debe coincidir con SERIAL_PORT / BAUD_RATE del script de Python
+  (baxter_console_control.py). BAUD_RATE aquí = 115200.
+
+  --------------------------------------------------------------------
+  CONEXIONES (ajustables abajo en PIN_POT_X / PIN_POT_Y / PIN_POT_Z /
+  PIN_BOTON):
+
+    Potenciómetro X:  terminal central -> GPIO34 (ADC1_CH6)
+    Potenciómetro Y:  terminal central -> GPIO35 (ADC1_CH7)
+    Potenciómetro Z:  terminal central -> GPIO32 (ADC1_CH4)
+    (los otros dos terminales de cada potenciómetro van a 3V3 y GND)
+
+    Pulsador pinza:   un extremo -> GPIO25, el otro -> GND
+                       (se usa INPUT_PULLUP, no requiere resistencia externa)
+
+  NOTA: usar únicamente pines ADC1 (32-39) porque ADC2 no funciona si
+  el ESP32 tiene el WiFi activo. Este firmware no usa WiFi.
+*/
+
+// ------------------- CONFIGURACIÓN DE PINES -------------------
+const int PIN_POT_X = 34;
+const int PIN_POT_Y = 35;
+const int PIN_POT_Z = 32;
+const int PIN_BOTON = 25;   // pulsador: presionado = pinza CERRADA
+
+// ------------------- RANGOS DEL ESPACIO DE TRABAJO -------------------
+// Ajustar estos límites según el alcance real que quieras permitirle
+// al brazo en la simulación (coinciden con el demo original de PyBullet).
+const float X_MIN = -0.30, X_MAX = 0.90;
+const float Y_MIN = -0.80, Y_MAX = 0.80;
+const float Z_MIN = -0.30, Z_MAX = 0.50;
+
+// ------------------- SUAVIZADO (filtro exponencial) -------------------
+// Además del filtrado que hace Python, se suaviza aquí la lectura cruda
+// del ADC para eliminar ruido de los potenciómetros.
+const float FILTRO_ALPHA = 0.25;
+
+const unsigned long INTERVALO_ENVIO_MS = 30;  // ~33 Hz
+
+float filtX = 0, filtY = 0, filtZ = 0;
+bool primeraLectura = true;
+unsigned long ultimoEnvio = 0;
+
+float leerFiltrado(int pin, float &estadoFiltro) {
+  int crudo = analogRead(pin);              // 0 - 4095 (ADC de 12 bits)
+  float valor = crudo / 4095.0;             // normalizado 0.0 - 1.0
+  if (primeraLectura) {
+    estadoFiltro = valor;
+  } else {
+    estadoFiltro += FILTRO_ALPHA * (valor - estadoFiltro);
+  }
+  return estadoFiltro;
+}
 
 void setup() {
-
+  Serial.begin(115200);
+  analogReadResolution(12);          // 0-4095
+  pinMode(PIN_BOTON, INPUT_PULLUP);  // presionado = LOW
+  delay(500);
 }
 
 void loop() {
+  float nx = leerFiltrado(PIN_POT_X, filtX);
+  float ny = leerFiltrado(PIN_POT_Y, filtY);
+  float nz = leerFiltrado(PIN_POT_Z, filtZ);
+  primeraLectura = false;
 
+  float x = X_MIN + nx * (X_MAX - X_MIN);
+  float y = Y_MIN + ny * (Y_MAX - Y_MIN);
+  float z = Z_MIN + nz * (Z_MAX - Z_MIN);
+
+  // Pulsador presionado (LOW) -> pinza cerrada (G=0)
+  int gripperOpen = (digitalRead(PIN_BOTON) == LOW) ? 0 : 1;
+
+  unsigned long ahora = millis();
+  if (ahora - ultimoEnvio >= INTERVALO_ENVIO_MS) {
+    ultimoEnvio = ahora;
+    Serial.print(x, 4);
+    Serial.print(",");
+    Serial.print(y, 4);
+    Serial.print(",");
+    Serial.print(z, 4);
+    Serial.print(",");
+    Serial.println(gripperOpen);
+  }
 }
+
 ```
 
 **Explicación del código:**
@@ -578,23 +1093,538 @@ en modo `--test` y ajustarlos hasta cubrir el espacio de trabajo deseado.
 - Registrar en `.csv` las trayectorias del efector para analizar velocidad y aceleración.
 - Hacer la consola inalámbrica con una segunda ESP32 o Bluetooth/ESP-NOW.
 
-### 3.9 Código Arduino IDE
+### 3.9 Código Visual (Python)
+```cpp
+import argparse
+import os
+import time
 
-<!-- Pega tu código entre las líneas ```cpp y ``` -->
+import numpy as np
+import pybullet as p
+import pybullet_data
+import serial
+
+# =============================================================================
+# Configuración general (ajusta estos valores mientras pruebas en el GUI)
+# =============================================================================
+
+BAXTER_URDF = "data/baxter_common/baxter_description/urdf/toms_baxter_ligero.urdf"
+BAXTER_URDF_ORIGINAL = "data/baxter_common/baxter_description/urdf/toms_baxter.urdf"
+BAXTER_BASE_POS = [0.5, -0.8, 0.0]
+BAXTER_BASE_ORN = [0.0, 0.0, -1.0, -1.0]  # igual que baxter_ik_demo.py
+
+# Nombres de los "endpoints" ya definidos en el URDF como referencia del
+# efector final de cada brazo (joints fijos left_endpoint / right_endpoint).
+ENDPOINT_JOINT_R = "right_endpoint"
+ENDPOINT_JOINT_L = "left_endpoint"
+
+RIGHT_ARM_JOINTS = ["right_s0", "right_s1", "right_e0", "right_e1",
+                    "right_w0", "right_w1", "right_w2"]
+LEFT_ARM_JOINTS = ["left_s0", "left_s1", "left_e0", "left_e1",
+                    "left_w0", "left_w1", "left_w2"]
+
+GRIPPER_R_JOINTS = ("r_gripper_l_finger_joint", "r_gripper_r_finger_joint")
+GRIPPER_L_JOINTS = ("l_gripper_l_finger_joint", "l_gripper_r_finger_joint")
+GRIPPER_OPEN_SIGN = {"r_gripper_l_finger_joint": 1, "r_gripper_r_finger_joint": -1,
+                      "l_gripper_l_finger_joint": 1, "l_gripper_r_finger_joint": -1}
+GRIPPER_MAX_TRAVEL = 0.020833  # límite real tomado del URDF
+
+HEAD_PAN_JOINT = "head_pan"
+HEAD_PAN_RANGE = (-1.3963, 1.3963)  # límites reales del URDF
+
+# Posiciones de reposo ("home") de cada efector final, en coordenadas
+# mundiales. Punto de partida tomado del target por defecto que ya funciona
+# en baxter_ik_demo.py (0.2, 0.0, -0.1); se separan +/- en Y para cada brazo.
+# AJUSTA ESTOS VALORES viendo el robot en el GUI si el punto no es alcanzable.
+HOME_POS_R = np.array([0.2, -0.30, -0.10])
+HOME_POS_L = np.array([0.2, 0.30, -0.10])
+
+# Límites de trabajo (caja segura) para cada efector final, en coordenadas
+# mundiales. Evita mandar objetivos claramente inalcanzables o que crucen
+# de un lado al otro del robot.
+WORKSPACE_X = (-0.15, 0.75)
+WORKSPACE_Y_R = (-0.75, -0.05)
+WORKSPACE_Y_L = (0.05, 0.75)
+WORKSPACE_Z = (-0.35, 0.45)
+
+XY_MAX_SPEED = 0.35      # m/s a máxima deflexión del joystick
+CONTROL_HZ = 50.0
+MAX_JOINT_VELOCITY = 2.0  # rad/s -> limita qué tan "brusco" se ve el movimiento
+MAX_FORCE = 300.0
+
+# =============================================================================
+# Utilidades de PyBullet: mapear nombres de joints a índices
+# =============================================================================
+
+
+def build_joint_maps(body_id):
+    """
+    Devuelve:
+      name_to_index: {nombre_joint: índice_joint}
+      name_to_qindex: {nombre_joint: índice dentro del vector que devuelve
+                        calculateInverseKinematics}
+      num_dofs: número total de grados de libertad no fijos del cuerpo
+    """
+    name_to_index = {}
+    name_to_qindex = {}
+    num_dofs = 0
+
+    for i in range(p.getNumJoints(body_id)):
+        info = p.getJointInfo(body_id, i)
+        joint_name = info[1].decode("utf-8")
+        q_index = info[3]
+        name_to_index[joint_name] = i
+        if q_index > -1:
+            # Mismo criterio usado en baxter_ik_demo.py: el vector de IK se
+            # indexa como qIndex - 7 (la ESP32/pybullet reserva 7 slots para
+            # una base flotante aunque la base esté fija).
+            name_to_qindex[joint_name] = q_index - 7
+            num_dofs += 1
+
+    return name_to_index, name_to_qindex, num_dofs
+
+
+def get_joint_ranges(body_id, num_dofs):
+    """Límites amplios + poses de reposo en el origen, igual que el demo."""
+    lower = [-2.0] * num_dofs
+    upper = [2.0] * num_dofs
+    ranges = [2.0] * num_dofs
+    rest = [0.0] * num_dofs
+    return lower, upper, ranges, rest
+
+
+def solve_ik(body_id, endpoint_index, target_pos, lower, upper, ranges, rest):
+    return p.calculateInverseKinematics(
+        body_id, endpoint_index, list(target_pos),
+        lowerLimits=lower, upperLimits=upper,
+        jointRanges=ranges, restPoses=rest,
+    )
+
+
+def apply_arm_pose(body_id, name_to_index, name_to_qindex, joint_names, ik_result):
+    """Aplica SOLO las articulaciones de un brazo (evita pisar el otro brazo)."""
+    for name in joint_names:
+        j_idx = name_to_index[name]
+        q_idx = name_to_qindex[name]
+        p.setJointMotorControl2(
+            bodyIndex=body_id, jointIndex=j_idx,
+            controlMode=p.POSITION_CONTROL,
+            targetPosition=ik_result[q_idx],
+            maxVelocity=MAX_JOINT_VELOCITY,
+            force=MAX_FORCE,
+        )
+
+
+def set_gripper(body_id, name_to_index, joint_names, open_fraction):
+    for name in joint_names:
+        j_idx = name_to_index[name]
+        sign = GRIPPER_OPEN_SIGN[name]
+        target = sign * GRIPPER_MAX_TRAVEL * open_fraction
+        p.setJointMotorControl2(
+            bodyIndex=body_id, jointIndex=j_idx,
+            controlMode=p.POSITION_CONTROL,
+            targetPosition=target, force=50.0, maxVelocity=1.0,
+        )
+
+
+def set_head_pan(body_id, name_to_index, angle):
+    j_idx = name_to_index[HEAD_PAN_JOINT]
+    p.setJointMotorControl2(
+        bodyIndex=body_id, jointIndex=j_idx,
+        controlMode=p.POSITION_CONTROL,
+        targetPosition=angle, force=100.0, maxVelocity=1.5,
+    )
+
+
+# =============================================================================
+# Lectura de la consola (serial real, o sliders de PyBullet en modo --test)
+# =============================================================================
+
+
+class SerialConsole:
+    """Lee la trama del ESP32 sin acumular retraso: si llegaron varias
+    líneas desde la última lectura, se queda solo con la más reciente."""
+
+    FIELDS = 12
+
+    def __init__(self, port, baud=115200):
+        self.ser = serial.Serial(port, baud, timeout=0)
+        time.sleep(2.0)  # tiempo típico de reinicio de la ESP32 al abrir el puerto
+        self.ser.reset_input_buffer()
+        self._prev_grip_r = 0
+        self._prev_grip_l = 0
+        self._prev_home_r = 0
+        self._prev_home_l = 0
+
+    def read(self):
+        """Devuelve un dict con la última trama válida, o None si no hay dato nuevo."""
+        last_line = None
+        while self.ser.in_waiting:
+            raw = self.ser.readline()
+            if raw:
+                last_line = raw
+
+        if last_line is None:
+            return None
+
+        try:
+            text = last_line.decode("utf-8", errors="ignore").strip()
+            parts = text.split(",")
+            if len(parts) != self.FIELDS:
+                return None
+            vals = [float(x) for x in parts]
+        except ValueError:
+            return None
+
+        return {
+            "vxR": vals[0], "vyR": vals[1], "zR": vals[2],
+            "vxL": vals[3], "vyL": vals[4], "zL": vals[5],
+            "head": vals[6],
+            "gripR": int(vals[7]), "gripL": int(vals[8]),
+            "homeR": int(vals[9]), "homeL": int(vals[10]),
+            "estop": bool(vals[11]),
+        }
+
+
+class DebugSliderConsole:
+    """Sustituto de la ESP32 usando los sliders de depuración de PyBullet,
+    para validar la parte de PyBullet antes de tener el hardware armado."""
+
+    def __init__(self):
+        self.sx_r = p.addUserDebugParameter("R vx", -1, 1, 0)
+        self.sy_r = p.addUserDebugParameter("R vy", -1, 1, 0)
+        self.sz_r = p.addUserDebugParameter("R potZ", 0, 1, 0.5)
+        self.sx_l = p.addUserDebugParameter("L vx", -1, 1, 0)
+        self.sy_l = p.addUserDebugParameter("L vy", -1, 1, 0)
+        self.sz_l = p.addUserDebugParameter("L potZ", 0, 1, 0.5)
+        self.head = p.addUserDebugParameter("head", 0, 1, 0.5)
+        self.grip_r = p.addUserDebugParameter("Grip R (toggle)", 0, 1, 0)
+        self.grip_l = p.addUserDebugParameter("Grip L (toggle)", 0, 1, 0)
+        self.home_r = p.addUserDebugParameter("Home R (toggle)", 0, 1, 0)
+        self.home_l = p.addUserDebugParameter("Home L (toggle)", 0, 1, 0)
+        self.estop = p.addUserDebugParameter("ESTOP", 0, 1, 0)
+        self._prev = {"gripR": 0, "gripL": 0, "homeR": 0, "homeL": 0}
+
+    def _edge(self, key, raw_level):
+        level = 1 if raw_level > 0.5 else 0
+        edge = 1 if (level == 1 and self._prev[key] == 0) else 0
+        self._prev[key] = level
+        return edge
+
+    def read(self):
+        return {
+            "vxR": p.readUserDebugParameter(self.sx_r),
+            "vyR": p.readUserDebugParameter(self.sy_r),
+            "zR": p.readUserDebugParameter(self.sz_r),
+            "vxL": p.readUserDebugParameter(self.sx_l),
+            "vyL": p.readUserDebugParameter(self.sy_l),
+            "zL": p.readUserDebugParameter(self.sz_l),
+            "head": p.readUserDebugParameter(self.head),
+            "gripR": self._edge("gripR", p.readUserDebugParameter(self.grip_r)),
+            "gripL": self._edge("gripL", p.readUserDebugParameter(self.grip_l)),
+            "homeR": self._edge("homeR", p.readUserDebugParameter(self.home_r)),
+            "homeL": self._edge("homeL", p.readUserDebugParameter(self.home_l)),
+            "estop": p.readUserDebugParameter(self.estop) > 0.5,
+        }
+
+
+# =============================================================================
+# Programa principal
+# =============================================================================
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Consola de mandos ESP32 para Baxter en PyBullet")
+    parser.add_argument("--port", type=str, default=None, help="Puerto serie de la ESP32 (ej. COM5, /dev/ttyUSB0)")
+    parser.add_argument("--baud", type=int, default=115200)
+    parser.add_argument("--test", action="store_true", help="Usar sliders de PyBullet en vez de la ESP32")
+    args = parser.parse_args()
+
+    if not args.test and not args.port:
+        parser.error("Debes indicar --port COMx (o usar --test para probar sin la ESP32)")
+
+    if not os.path.exists(BAXTER_URDF):
+        raise SystemExit(
+            f"No se encontró '{BAXTER_URDF}'.\n"
+            "Genera primero el URDF ligero (una sola vez):\n"
+            "  cd baxter_common/baxter_description/urdf\n"
+            "  python generar_urdf_ligero.py\n"
+            "y vuelve a ejecutar este script desde la carpeta pybullet_robots."
+        )
+
+    # ---- Mundo PyBullet, con la ventana 3D aligerada para GPU integrada ----
+    # Resolución reducida (menos píxeles = menos trabajo de la GPU).
+    p.connect(p.GUI, options="--width=900 --height=560")
+    p.setAdditionalSearchPath(pybullet_data.getDataPath())
+
+    # Sombras y paneles laterales apagados: son el segundo mayor consumo de
+    # GPU después de las mallas 3D (que ya quitamos con el URDF ligero).
+    p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 0)
+    if not args.test:
+        # En modo --test, este panel es el que muestra los sliders de
+        # control; solo se apaga cuando ya se usa la ESP32 real.
+        p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
+    p.configureDebugVisualizer(p.COV_ENABLE_RGB_BUFFER_PREVIEW, 0)
+    p.configureDebugVisualizer(p.COV_ENABLE_DEPTH_BUFFER_PREVIEW, 0)
+    p.configureDebugVisualizer(p.COV_ENABLE_SEGMENTATION_MARK_PREVIEW, 0)
+
+    p.resetDebugVisualizerCamera(2.0, 180, 0.0, [0.52, 0.2, 0.3])
+    p.setGravity(0, 0, -10)
+
+    p.loadURDF("plane.urdf", [0, 0, -1], useFixedBase=True)
+    body_id = p.loadURDF(BAXTER_URDF, useFixedBase=True)
+    p.resetBasePositionAndOrientation(body_id, BAXTER_BASE_POS, BAXTER_BASE_ORN)
+
+    for _ in range(100):
+        p.stepSimulation()
+
+    name_to_index, name_to_qindex, num_dofs = build_joint_maps(body_id)
+    lower, upper, ranges, rest = get_joint_ranges(body_id, num_dofs)
+
+    endpoint_r = name_to_index[ENDPOINT_JOINT_R]
+    endpoint_l = name_to_index[ENDPOINT_JOINT_L]
+
+    # ---- Consola de entrada ----
+    console = DebugSliderConsole() if args.test else SerialConsole(args.port, args.baud)
+
+    # ---- Estado de control ----
+    target_r = HOME_POS_R.copy()
+    target_l = HOME_POS_L.copy()
+    grip_open_r = True
+    grip_open_l = True
+
+    dt = 1.0 / CONTROL_HZ
+    print("Consola lista. Ctrl+C para salir.")
+
+    try:
+        while True:
+            frame = console.read()
+
+            if frame is not None:
+                if frame["estop"]:
+                    # Paro de emergencia: no se actualiza nada, los motores
+                    # mantienen su última posición ya asignada.
+                    pass
+                else:
+                    if frame["homeR"]:
+                        target_r = HOME_POS_R.copy()
+                    else:
+                        target_r[0] += frame["vxR"] * XY_MAX_SPEED * dt
+                        target_r[1] += frame["vyR"] * XY_MAX_SPEED * dt
+                        target_r[2] = np.interp(frame["zR"], [0, 1], WORKSPACE_Z)
+                        target_r[0] = float(np.clip(target_r[0], *WORKSPACE_X))
+                        target_r[1] = float(np.clip(target_r[1], *WORKSPACE_Y_R))
+
+                    if frame["homeL"]:
+                        target_l = HOME_POS_L.copy()
+                    else:
+                        target_l[0] += frame["vxL"] * XY_MAX_SPEED * dt
+                        target_l[1] += frame["vyL"] * XY_MAX_SPEED * dt
+                        target_l[2] = np.interp(frame["zL"], [0, 1], WORKSPACE_Z)
+                        target_l[0] = float(np.clip(target_l[0], *WORKSPACE_X))
+                        target_l[1] = float(np.clip(target_l[1], *WORKSPACE_Y_L))
+
+                    if frame["gripR"]:
+                        grip_open_r = not grip_open_r
+                    if frame["gripL"]:
+                        grip_open_l = not grip_open_l
+
+                    head_angle = np.interp(frame["head"], [0, 1], HEAD_PAN_RANGE)
+                    set_head_pan(body_id, name_to_index, head_angle)
+                    set_gripper(body_id, name_to_index, GRIPPER_R_JOINTS, 1.0 if grip_open_r else 0.0)
+                    set_gripper(body_id, name_to_index, GRIPPER_L_JOINTS, 1.0 if grip_open_l else 0.0)
+
+                    ik_r = solve_ik(body_id, endpoint_r, target_r, lower, upper, ranges, rest)
+                    ik_l = solve_ik(body_id, endpoint_l, target_l, lower, upper, ranges, rest)
+                    apply_arm_pose(body_id, name_to_index, name_to_qindex, RIGHT_ARM_JOINTS, ik_r)
+                    apply_arm_pose(body_id, name_to_index, name_to_qindex, LEFT_ARM_JOINTS, ik_l)
+
+            p.stepSimulation()
+            time.sleep(dt)
+
+    except KeyboardInterrupt:
+        print("\nCerrando...")
+    finally:
+        p.disconnect()
+
+
+if __name__ == "__main__":
+    main()
+
+
+```
+
+### 3.10 Código Arduino IDE
 
 📄 Archivo: [`punto3/esp32_baxter_console.ino`](punto3/esp32_baxter_console.ino)
 
 ```cpp
-// ===== Punto 3 — Consola ESP32 (dos brazos, visor 3D ligero) =====
-// Pega aquí tu código
+const int PIN_VRX_R    = 34;
+const int PIN_VRY_R    = 35;
+const int PIN_POTZ_R   = 32;
+const int PIN_VRX_L    = 33;
+const int PIN_VRY_L    = 36;
+const int PIN_POTZ_L   = 39;
+const int PIN_POT_HEAD = 25;
 
+// ---------------------------- Pines digitales --------------------------------
+const int PIN_BTN_HOME_R = 18;
+const int PIN_BTN_GRIP_R = 19;
+const int PIN_BTN_HOME_L = 21;
+const int PIN_BTN_GRIP_L = 22;
+const int PIN_BTN_ESTOP  = 23;
+
+// ---------------------------- Parámetros de filtrado -------------------------
+const float EMA_ALPHA          = 0.25f;  // 0<alpha<=1 ; más bajo = más suave/lento
+const int   DEADZONE           = 150;    // zona muerta joystick (sobre 0-4095, centro ~2048)
+const unsigned long SEND_PERIOD_MS = 20; // 50 Hz
+
+// ---------------------------- Estado filtrado ---------------------------------
+float emaVxR = 0, emaVyR = 0, emaZR = 0;
+float emaVxL = 0, emaVyL = 0, emaZL = 0;
+float emaHead = 0;
+unsigned long lastSend = 0;
+
+// ---------------------------- Manejo de botones con antirrebote --------------
+struct Button {
+  int pin;
+  bool state;      // estado "toggle" ya confirmado (para los de flanco)
+  int  lastRead;
+  unsigned long lastChange;
+};
+
+Button btnHomeR = {PIN_BTN_HOME_R, false, HIGH, 0};
+Button btnGripR = {PIN_BTN_GRIP_R, false, HIGH, 0};
+Button btnHomeL = {PIN_BTN_HOME_L, false, HIGH, 0};
+Button btnGripL = {PIN_BTN_GRIP_L, false, HIGH, 0};
+Button btnEstop = {PIN_BTN_ESTOP,  false, HIGH, 0};
+
+const unsigned long DEBOUNCE_MS = 30;
+
+// Devuelve true SOLO en el instante en que el botón pasa de suelto a presionado
+bool readButtonEdge(Button &b) {
+  int reading = digitalRead(b.pin);
+  bool pressedEdge = false;
+
+  if (reading != b.lastRead) {
+    b.lastChange = millis();
+  }
+  if ((millis() - b.lastChange) > DEBOUNCE_MS) {
+    if (reading == LOW && b.state == false) {
+      b.state = true;
+      pressedEdge = true;
+    } else if (reading == HIGH) {
+      b.state = false;
+    }
+  }
+  b.lastRead = reading;
+  return pressedEdge;
+}
+
+// Devuelve el nivel actual estable (para el botón de mantener, ej. paro de emergencia)
+bool readButtonLevel(Button &b) {
+  int reading = digitalRead(b.pin);
+  if (reading != b.lastRead) {
+    b.lastChange = millis();
+  }
+  if ((millis() - b.lastChange) > DEBOUNCE_MS) {
+    b.state = (reading == LOW);
+  }
+  b.lastRead = reading;
+  return b.state;
+}
+
+// ---------------------------- Utilidades de señal -----------------------------
+float applyDeadzoneAndNormalize(int raw) {
+  const int center = 2048;
+  const int maxDev = 2048;
+  int dev = raw - center;
+  if (abs(dev) < DEADZONE) {
+    dev = 0;
+  } else {
+    dev = (dev > 0) ? (dev - DEADZONE) : (dev + DEADZONE);
+  }
+  float norm = (float)dev / (float)(maxDev - DEADZONE);
+  if (norm > 1.0f)  norm = 1.0f;
+  if (norm < -1.0f) norm = -1.0f;
+  return norm;
+}
+
+float ema(float prev, float sample, float alpha) {
+  return alpha * sample + (1.0f - alpha) * prev;
+}
+
+// ---------------------------- Setup / Loop -------------------------------------
 void setup() {
+  Serial.begin(115200);
 
+  analogReadResolution(12);        // 0-4095
+  analogSetAttenuation(ADC_11db);  // permite leer el rango completo 0-3.3V
+
+  pinMode(PIN_BTN_HOME_R, INPUT_PULLUP);
+  pinMode(PIN_BTN_GRIP_R, INPUT_PULLUP);
+  pinMode(PIN_BTN_HOME_L, INPUT_PULLUP);
+  pinMode(PIN_BTN_GRIP_L, INPUT_PULLUP);
+  pinMode(PIN_BTN_ESTOP,  INPUT_PULLUP);
+
+  delay(300); // estabilización de la fuente/ADC al arrancar
 }
 
 void loop() {
+  // ---- Lectura cruda ----
+  int rawVxR  = analogRead(PIN_VRX_R);
+  int rawVyR  = analogRead(PIN_VRY_R);
+  int rawZR   = analogRead(PIN_POTZ_R);
+  int rawVxL  = analogRead(PIN_VRX_L);
+  int rawVyL  = analogRead(PIN_VRY_L);
+  int rawZL   = analogRead(PIN_POTZ_L);
+  int rawHead = analogRead(PIN_POT_HEAD);
 
+  // ---- Normalización + zona muerta en joysticks ----
+  float nVxR = applyDeadzoneAndNormalize(rawVxR);
+  float nVyR = applyDeadzoneAndNormalize(rawVyR);
+  float nVxL = applyDeadzoneAndNormalize(rawVxL);
+  float nVyL = applyDeadzoneAndNormalize(rawVyL);
+
+  // ---- Potenciómetros: valor absoluto 0..1 ----
+  float nZR   = rawZR   / 4095.0f;
+  float nZL   = rawZL   / 4095.0f;
+  float nHead = rawHead / 4095.0f;
+
+  // ---- Filtro EMA: esto es lo que hace el movimiento FLUIDO ----
+  emaVxR  = ema(emaVxR,  nVxR,  EMA_ALPHA);
+  emaVyR  = ema(emaVyR,  nVyR,  EMA_ALPHA);
+  emaZR   = ema(emaZR,   nZR,   EMA_ALPHA);
+  emaVxL  = ema(emaVxL,  nVxL,  EMA_ALPHA);
+  emaVyL  = ema(emaVyL,  nVyL,  EMA_ALPHA);
+  emaZL   = ema(emaZL,   nZL,   EMA_ALPHA);
+  emaHead = ema(emaHead, nHead, EMA_ALPHA);
+
+  // ---- Botones ----
+  bool homeR_edge = readButtonEdge(btnHomeR);
+  bool gripR_edge = readButtonEdge(btnGripR);
+  bool homeL_edge = readButtonEdge(btnHomeL);
+  bool gripL_edge = readButtonEdge(btnGripL);
+  bool estopLevel = readButtonLevel(btnEstop);
+
+  // ---- Envío de trama a 50 Hz ----
+  if (millis() - lastSend >= SEND_PERIOD_MS) {
+    lastSend = millis();
+    Serial.print(emaVxR, 3);            Serial.print(',');
+    Serial.print(emaVyR, 3);            Serial.print(',');
+    Serial.print(emaZR,  3);            Serial.print(',');
+    Serial.print(emaVxL, 3);            Serial.print(',');
+    Serial.print(emaVyL, 3);            Serial.print(',');
+    Serial.print(emaZL,  3);            Serial.print(',');
+    Serial.print(emaHead, 3);           Serial.print(',');
+    Serial.print(gripR_edge ? 1 : 0);   Serial.print(',');
+    Serial.print(gripL_edge ? 1 : 0);   Serial.print(',');
+    Serial.print(homeR_edge ? 1 : 0);   Serial.print(',');
+    Serial.print(homeL_edge ? 1 : 0);   Serial.print(',');
+    Serial.println(estopLevel ? 1 : 0);
+  }
 }
+
 ```
 
 **Explicación del código:**
