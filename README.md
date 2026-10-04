@@ -36,17 +36,21 @@ Este repositorio reúne los tres puntos del taller:
 .
 ├── README.md
 ├── punto1/
-│   └── (instrucciones y resultados de gym-pybullet-drones)
+│   ├── arduino/
+│   │   └── punto1.ino
+│   └── evidencias/          (fotos, GIF, capturas)
 ├── punto2/
 │   ├── baxter_console_control.py
-│   └── esp32_console/
-│       └── esp32_console.ino
+│   ├── esp32_console/
+│   │   └── esp32_console.ino
+│   └── evidencias/
 └── punto3/
     ├── esp32_baxter_console.ino
     ├── generar_urdf_ligero.py
     ├── baxter_console_control_3d_ligero.py
     ├── baxter_console_control_ligero.py
-    └── baxter_console_control.py
+    ├── baxter_console_control.py
+    └── evidencias/
 ```
 
 ---
@@ -146,7 +150,40 @@ python3 beta.py --num_drones 2
   abrir `nvidia-settings`, en **PRIME Profiles** elegir
   **NVIDIA (Performance Mode)**, reiniciar y volver a intentar.
 
-### 1.8 Cita
+### 1.8 Código Arduino IDE
+
+<!-- Pega tu código entre las líneas ```cpp y ``` y guarda el archivo .ino en punto1/arduino/ -->
+
+📄 Archivo: [`punto1/arduino/punto1.ino`](punto1/arduino/punto1.ino)
+
+```cpp
+// ===== Punto 1 — Código Arduino IDE =====
+// Pega aquí tu código
+
+void setup() {
+
+}
+
+void loop() {
+
+}
+```
+
+**Explicación del código:**
+
+- _Describe aquí qué hace cada parte del código._
+
+### 1.9 Evidencias del funcionamiento
+
+<!-- Guarda tus fotos/GIF en punto1/evidencias/ y reemplaza los nombres de archivo -->
+
+| Montaje | Funcionamiento |
+|---|---|
+| ![Montaje punto 1](punto1/evidencias/montaje.jpg) | ![Funcionamiento punto 1](punto1/evidencias/funcionamiento.gif) |
+
+🎥 Video: [Ver demostración del Punto 1](PEGA_AQUI_EL_ENLACE_DEL_VIDEO)
+
+### 1.10 Cita
 
 ```bibtex
 @INPROCEEDINGS{panerati2021learning,
@@ -311,6 +348,45 @@ elimina y el objeto queda sujeto a la gravedad (si se suelta en el aire, cae).
 
 - `baxter_console_control.py` — simulación PyBullet + lectura serial + IK + agarre
 - `esp32_console/esp32_console.ino` — firmware de la consola física
+
+### 2.9 Código Arduino IDE
+
+<!-- Pega tu código entre las líneas ```cpp y ``` -->
+
+📄 Archivo: [`punto2/esp32_console/esp32_console.ino`](punto2/esp32_console/esp32_console.ino)
+
+```cpp
+// ===== Punto 2 — Consola ESP32 (un brazo + agarre) =====
+// Pega aquí tu código
+
+void setup() {
+
+}
+
+void loop() {
+
+}
+```
+
+**Explicación del código:**
+
+- _Lectura de los potenciómetros (GPIO34, 35, 32):_
+- _Lectura del pulsador de la pinza (GPIO25):_
+- _Filtrado y envío por serial a 115200 baudios:_
+
+### 2.10 Evidencias del funcionamiento
+
+<!-- Guarda tus fotos/GIF en punto2/evidencias/ y reemplaza los nombres de archivo -->
+
+| Consola física | Baxter en PyBullet |
+|---|---|
+| ![Consola punto 2](punto2/evidencias/consola.jpg) | ![Simulación punto 2](punto2/evidencias/simulacion.gif) |
+
+| Monitor Serial | Agarre del cubo |
+|---|---|
+| ![Monitor serial punto 2](punto2/evidencias/monitor_serial.png) | ![Agarre punto 2](punto2/evidencias/agarre.gif) |
+
+🎥 Video: [Ver demostración del Punto 2](PEGA_AQUI_EL_ENLACE_DEL_VIDEO)
 
 ---
 
@@ -501,6 +577,46 @@ en modo `--test` y ajustarlos hasta cubrir el espacio de trabajo deseado.
 - Incluir en el informe la comparación de tiempos de carga (original vs. ligero).
 - Registrar en `.csv` las trayectorias del efector para analizar velocidad y aceleración.
 - Hacer la consola inalámbrica con una segunda ESP32 o Bluetooth/ESP-NOW.
+
+### 3.9 Código Arduino IDE
+
+<!-- Pega tu código entre las líneas ```cpp y ``` -->
+
+📄 Archivo: [`punto3/esp32_baxter_console.ino`](punto3/esp32_baxter_console.ino)
+
+```cpp
+// ===== Punto 3 — Consola ESP32 (dos brazos, visor 3D ligero) =====
+// Pega aquí tu código
+
+void setup() {
+
+}
+
+void loop() {
+
+}
+```
+
+**Explicación del código:**
+
+- _Lectura de joysticks y potenciómetros (GPIO34, 35, 32, 33, 36, 39, 25):_
+- _Lectura de pulsadores home, pinzas y emergencia (GPIO18, 19, 21, 22, 23):_
+- _Filtro EMA + zona muerta:_
+- _Trama serial enviada al PC (12 valores separados por comas):_
+
+### 3.10 Evidencias del funcionamiento
+
+<!-- Guarda tus fotos/GIF en punto3/evidencias/ y reemplaza los nombres de archivo -->
+
+| Consola física | Baxter ligero en PyBullet |
+|---|---|
+| ![Consola punto 3](punto3/evidencias/consola.jpg) | ![Simulación punto 3](punto3/evidencias/simulacion.gif) |
+
+| Monitor Serial | Movimiento de ambos brazos |
+|---|---|
+| ![Monitor serial punto 3](punto3/evidencias/monitor_serial.png) | ![Dos brazos punto 3](punto3/evidencias/dos_brazos.gif) |
+
+🎥 Video: [Ver demostración del Punto 3](PEGA_AQUI_EL_ENLACE_DEL_VIDEO)
 
 ---
 
