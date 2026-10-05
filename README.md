@@ -1,5 +1,8 @@
 # Taller — Simulación robótica con PyBullet y consola de mandos ESP32
 
+Kevin Alejandro Vega Medina (7004318)
+Nicole Natalia Castillo Abril (7004339)
+
 **Universidad Militar Nueva Granada (UMNG) — Ingeniería Mecatrónica**
 
 Este repositorio reúne los tres puntos del taller:
