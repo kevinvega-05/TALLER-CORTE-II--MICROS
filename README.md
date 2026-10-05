@@ -33,30 +33,6 @@ Este repositorio reúne los tres puntos del taller:
 - Arduino IDE con el paquete de placas **ESP32** (Puntos 2 y 3)
 - Placa ESP32 DevKit (30 o 38 pines), potenciómetros, joysticks y pulsadores
 
-## Estructura del repositorio
-
-```
-.
-├── README.md
-├── punto1/
-│   ├── punto1_dron_esp32.py              (simulación del dron + lectura serial)
-│   ├── esp32_punto1/
-│   │   └── esp32_punto1.ino              (envía los lugares A, B, C)
-├── punto2/
-│   ├── baxter_console_control.py         (Baxter, un brazo + agarre)
-│   ├── esp32_console/
-│   │   └── esp32_console.ino             (3 potenciómetros + pulsador)
-│   
-└── punto3/
-    ├── baxter_console_control_3d_ligero.py   (Baxter, dos brazos, visor ligero)
-    ├── esp32_baxter_console/
-    │   └── esp32_baxter_console.ino          (2 joysticks, 3 pots, 5 pulsadores)
-```
-
-> En Arduino IDE cada sketch `.ino` debe estar dentro de una carpeta con su
-> mismo nombre; por eso cada firmware tiene su propia carpeta.
-
----
 
 # Punto 1 — Simulación de drones (gym-pybullet-drones)
 
