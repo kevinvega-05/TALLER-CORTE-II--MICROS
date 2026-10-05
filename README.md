@@ -889,21 +889,6 @@ void loop() {
 - _Lectura del pulsador de la pinza (GPIO25):_
 - _Filtrado y envío por serial a 115200 baudios:_
 
-### 2.10 Evidencias del funcionamiento
-
-<!-- Guarda tus fotos/GIF en punto2/evidencias/ y reemplaza los nombres de archivo -->
-
-| Consola física | Baxter en PyBullet |
-|---|---|
-| ![Consola punto 2](punto2/evidencias/consola.jpg) | ![Simulación punto 2](punto2/evidencias/simulacion.gif) |
-
-| Monitor Serial | Agarre del cubo |
-|---|---|
-| ![Monitor serial punto 2](punto2/evidencias/monitor_serial.png) | ![Agarre punto 2](punto2/evidencias/agarre.gif) |
-
-🎥 Video: [Ver demostración del Punto 2](PEGA_AQUI_EL_ENLACE_DEL_VIDEO)
-
----
 
 # Punto 3 — Consola ESP32 → Baxter (dos brazos, visor 3D ligero)
 
