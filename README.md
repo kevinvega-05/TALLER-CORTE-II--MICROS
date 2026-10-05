@@ -39,17 +39,15 @@ Este repositorio reúne los tres puntos del taller:
 │   ├── punto1_dron_esp32.py              (simulación del dron + lectura serial)
 │   ├── esp32_punto1/
 │   │   └── esp32_punto1.ino              (envía los lugares A, B, C)
-│   └── evidencias/                       (fotos, GIF, capturas)
 ├── punto2/
 │   ├── baxter_console_control.py         (Baxter, un brazo + agarre)
 │   ├── esp32_console/
 │   │   └── esp32_console.ino             (3 potenciómetros + pulsador)
-│   └── evidencias/
+│   
 └── punto3/
     ├── baxter_console_control_3d_ligero.py   (Baxter, dos brazos, visor ligero)
     ├── esp32_baxter_console/
     │   └── esp32_baxter_console.ino          (2 joysticks, 3 pots, 5 pulsadores)
-    └── evidencias/
 ```
 
 > En Arduino IDE cada sketch `.ino` debe estar dentro de una carpeta con su
@@ -467,28 +465,7 @@ void loop() {
 - **Ciclo:** incrementa `lugar_actual` y al pasar de 2 vuelve a 0, así que
   la ruta A → B → C se repite indefinidamente.
 
-### 1.10 Evidencias del funcionamiento
 
-<!-- Guarda tus fotos/GIF en punto1/evidencias/ y reemplaza los nombres de archivo -->
-
-| Montaje | Funcionamiento |
-|---|---|
-| ![Montaje punto 1](punto1/evidencias/montaje.jpg) | ![Funcionamiento punto 1](punto1/evidencias/funcionamiento.gif) |
-
-🎥 Video: [Ver demostración del Punto 1](PEGA_AQUI_EL_ENLACE_DEL_VIDEO)
-
-### 1.11 Cita
-
-```bibtex
-@INPROCEEDINGS{panerati2021learning,
-      title={Learning to Fly---a Gym Environment with PyBullet Physics for Reinforcement Learning of Multi-agent Quadcopter Control},
-      author={Jacopo Panerati and Hehui Zheng and SiQi Zhou and James Xu and Amanda Prorok and Angela P. Schoellig},
-      booktitle={2021 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)},
-      year={2021},
-      pages={7512-7519},
-      doi={10.1109/IROS51168.2021.9635857}
-}
-```
 
 ---
 
@@ -1131,19 +1108,6 @@ void loop() {
 - **Envío:** cada 30 ms (~33 Hz) manda `X,Y,Z,G` con 4 decimales, sin
   bloquear el programa (usa `millis()`).
 
-### 2.11 Evidencias del funcionamiento
-
-<!-- Guarda tus fotos/GIF en punto2/evidencias/ y reemplaza los nombres de archivo -->
-
-| Consola física | Baxter en PyBullet |
-|---|---|
-| ![Consola punto 2](punto2/evidencias/consola.jpg) | ![Simulación punto 2](punto2/evidencias/simulacion.gif) |
-
-| Monitor Serial | Agarre del cubo |
-|---|---|
-| ![Monitor serial punto 2](punto2/evidencias/monitor_serial.png) | ![Agarre punto 2](punto2/evidencias/agarre.gif) |
-
-🎥 Video: [Ver demostración del Punto 2](PEGA_AQUI_EL_ENLACE_DEL_VIDEO)
 
 ---
 
@@ -2041,19 +2005,6 @@ void loop() {
   (50 Hz) envía los 12 valores separados por comas y limpia las pulsaciones
   ya enviadas.
 
-### 3.11 Evidencias del funcionamiento
-
-<!-- Guarda tus fotos/GIF en punto3/evidencias/ y reemplaza los nombres de archivo -->
-
-| Consola física | Baxter ligero en PyBullet |
-|---|---|
-| ![Consola punto 3](punto3/evidencias/consola.jpg) | ![Simulación punto 3](punto3/evidencias/simulacion.gif) |
-
-| Monitor Serial | Movimiento de ambos brazos |
-|---|---|
-| ![Monitor serial punto 3](punto3/evidencias/monitor_serial.png) | ![Dos brazos punto 3](punto3/evidencias/dos_brazos.gif) |
-
-🎥 Video: [Ver demostración del Punto 3](PEGA_AQUI_EL_ENLACE_DEL_VIDEO)
 
 ---
 
